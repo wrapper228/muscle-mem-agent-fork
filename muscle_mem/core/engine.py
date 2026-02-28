@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict
+from typing import Any, Callable, Dict, List
 
 import backoff
 from anthropic import Anthropic
@@ -12,6 +12,25 @@ from openai import (
     OpenAI,
     RateLimitError,
 )
+
+_usage_hooks: List[Callable] = []
+
+
+def register_usage_hook(fn: Callable) -> None:
+    """Register a callback invoked after every LLM generate() call.
+
+    Signature: fn(model: str, usage: Any) where usage is the provider's
+    usage object (e.g. OpenAI CompletionUsage or Anthropic Usage).
+    """
+    _usage_hooks.append(fn)
+
+
+def _fire_usage(model: str, usage: Any) -> None:
+    for fn in _usage_hooks:
+        try:
+            fn(model, usage)
+        except Exception:
+            pass
 
 
 class LMMEngine:
@@ -55,20 +74,17 @@ class LMMEngineOpenAI(LMMEngine):
                 self.llm_client = OpenAI(
                     base_url=self.base_url, api_key=api_key, organization=organization
                 )
-        completion_message = (
-            self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                # max_completion_tokens=max_new_tokens if max_new_tokens else 4096,
-                temperature=(
-                    temperature if self.temperature is None else self.temperature
-                ),
-                **kwargs,
-            )
-            .choices[0]
-            .message
+        completion = self.llm_client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            # max_completion_tokens=max_new_tokens if max_new_tokens else 4096,
+            temperature=(
+                temperature if self.temperature is None else self.temperature
+            ),
+            **kwargs,
         )
-        return completion_message.content
+        _fire_usage(self.model, getattr(completion, "usage", None))
+        return completion.choices[0].message.content
 
     def generate_with_thinking(
         self, messages, temperature=0.0, max_new_tokens=None, **kwargs
@@ -86,18 +102,16 @@ class LMMEngineOpenAI(LMMEngine):
                 self.llm_client = OpenAI(
                     base_url=self.base_url, api_key=api_key, organization=organization
                 )
-        completion_message = (
-            self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=(
-                    temperature if self.temperature is None else self.temperature
-                ),
-                **kwargs,
-            )
-            .choices[0]
-            .message
+        completion = self.llm_client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=(
+                temperature if self.temperature is None else self.temperature
+            ),
+            **kwargs,
         )
+        _fire_usage(self.model, getattr(completion, "usage", None))
+        completion_message = completion.choices[0].message
         thinking = getattr(completion_message, "reasoning_content", None)
         return completion_message.content, thinking
 
@@ -231,6 +245,7 @@ class LMMEngineAnthropic(LMMEngine):
                 thinking={"type": "enabled", "budget_tokens": 4096},
                 **request_kwargs,
             )
+            _fire_usage(self.model, getattr(full_response, "usage", None))
             if request_kwargs.get("tools"):
                 return self._normalize_tool_response(full_response)
             return full_response.content[1].text
@@ -242,6 +257,7 @@ class LMMEngineAnthropic(LMMEngine):
             temperature=temp,
             **request_kwargs,
         )
+        _fire_usage(self.model, getattr(response, "usage", None))
         if request_kwargs.get("tools"):
             return self._normalize_tool_response(response)
         return response.content[0].text
@@ -285,6 +301,7 @@ class LMMEngineAnthropic(LMMEngine):
             thinking={"type": "enabled", "budget_tokens": 4096},
             **request_kwargs,
         )
+        _fire_usage(self.model, getattr(full_response, "usage", None))
 
         if request_kwargs.get("tools"):
             return self._normalize_tool_response(full_response)
@@ -430,6 +447,7 @@ class LMMEngineAnthropicLR(LMMEngine):
                 thinking={"type": "enabled", "budget_tokens": 4096},
                 **request_kwargs,
             )
+            _fire_usage(self.model, getattr(full_response, "usage", None))
             if request_kwargs.get("tools"):
                 return self._normalize_tool_response(full_response)
             return full_response.content[1].text
@@ -441,6 +459,7 @@ class LMMEngineAnthropicLR(LMMEngine):
             temperature=temp,
             **request_kwargs,
         )
+        _fire_usage(self.model, getattr(response, "usage", None))
         if request_kwargs.get("tools"):
             return self._normalize_tool_response(response)
         return response.content[0].text
@@ -484,6 +503,7 @@ class LMMEngineAnthropicLR(LMMEngine):
             thinking={"type": "enabled", "budget_tokens": 4096},
             **request_kwargs,
         )
+        _fire_usage(self.model, getattr(full_response, "usage", None))
 
         if request_kwargs.get("tools"):
             return self._normalize_tool_response(full_response)
@@ -532,17 +552,15 @@ class LMMEngineGemini(LMMEngine):
             self.llm_client = OpenAI(base_url=base_url, api_key=api_key)
         # Use the temperature passed to generate, otherwise use the instance's temperature, otherwise default to 0.0
         temp = self.temperature if temperature is None else temperature
-        return (
-            self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=max_new_tokens if max_new_tokens else 4096,
-                temperature=temp,
-                **kwargs,
-            )
-            .choices[0]
-            .message.content
+        completion = self.llm_client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_tokens=max_new_tokens if max_new_tokens else 4096,
+            temperature=temp,
+            **kwargs,
         )
+        _fire_usage(self.model, getattr(completion, "usage", None))
+        return completion.choices[0].message.content
 
 
 class LMMEngineOpenRouter(LMMEngine):
@@ -581,17 +599,15 @@ class LMMEngineOpenRouter(LMMEngine):
             self.llm_client = OpenAI(base_url=base_url, api_key=api_key)
         # Use self.temperature if set, otherwise use the temperature argument
         temp = self.temperature if self.temperature is not None else temperature
-        return (
-            self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=max_new_tokens if max_new_tokens else 4096,
-                temperature=temp,
-                **kwargs,
-            )
-            .choices[0]
-            .message.content
+        completion = self.llm_client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_tokens=max_new_tokens if max_new_tokens else 4096,
+            temperature=temp,
+            **kwargs,
         )
+        _fire_usage(self.model, getattr(completion, "usage", None))
+        return completion.choices[0].message.content
 
 
 class LMMEngineAzureOpenAI(LMMEngine):
@@ -652,6 +668,7 @@ class LMMEngineAzureOpenAI(LMMEngine):
         )
         total_tokens = completion.usage.total_tokens
         self.cost += 0.02 * ((total_tokens + 500) / 1000)
+        _fire_usage(self.model, getattr(completion, "usage", None))
         return completion.choices[0].message.content
 
 
@@ -707,6 +724,7 @@ class LMMEnginevLLM(LMMEngine):
             top_p=top_p,
             extra_body={"repetition_penalty": repetition_penalty},
         )
+        _fire_usage(self.model, getattr(completion, "usage", None))
         return completion.choices[0].message.content
 
 
@@ -733,17 +751,15 @@ class LMMEngineHuggingFace(LMMEngine):
             )
         if not self.llm_client:
             self.llm_client = OpenAI(base_url=base_url, api_key=api_key)
-        return (
-            self.llm_client.chat.completions.create(
-                model="tgi",
-                messages=messages,
-                max_tokens=max_new_tokens if max_new_tokens else 4096,
-                temperature=temperature,
-                **kwargs,
-            )
-            .choices[0]
-            .message.content
+        completion = self.llm_client.chat.completions.create(
+            model="tgi",
+            messages=messages,
+            max_tokens=max_new_tokens if max_new_tokens else 4096,
+            temperature=temperature,
+            **kwargs,
         )
+        _fire_usage("tgi", getattr(completion, "usage", None))
+        return completion.choices[0].message.content
 
 
 class LMMEngineParasail(LMMEngine):
@@ -776,14 +792,12 @@ class LMMEngineParasail(LMMEngine):
                 base_url=base_url if base_url else "https://api.parasail.io/v1",
                 api_key=api_key,
             )
-        return (
-            self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=max_new_tokens if max_new_tokens else 4096,
-                temperature=temperature,
-                **kwargs,
-            )
-            .choices[0]
-            .message.content
+        completion = self.llm_client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_tokens=max_new_tokens if max_new_tokens else 4096,
+            temperature=temperature,
+            **kwargs,
         )
+        _fire_usage(self.model, getattr(completion, "usage", None))
+        return completion.choices[0].message.content

@@ -78,6 +78,55 @@ We treat tools as a primary control surface and curate them for reliability:
 
 ---
 
+## Telegram Monitoring (Local Run)
+
+When running the agent locally via `muscle-mem-agent`, you can receive real-time monitoring in a Telegram chat: screenshots at every step, the action the agent decided to take, all INFO-level logs, and per-call token usage from every LLM provider.
+
+### 1. Create a bot
+
+1. Open [@BotFather](https://t.me/BotFather) in Telegram → send `/newbot` → follow the prompts → copy the **bot token**.
+2. Send any message to your new bot, then open:
+   ```
+   https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
+   ```
+   Find `"chat": {"id": <number>}` — that is your **chat ID**.
+
+### 2. Configure credentials
+
+Either export environment variables (recommended):
+
+```bash
+export TG_BOT_TOKEN="123456789:ABCdef..."
+export TG_CHAT_ID="987654321"
+```
+
+Or pass them as CLI flags:
+
+```bash
+muscle-mem-agent \
+  --provider anthropic --model claude-sonnet-4-20250514 \
+  --ground_provider openai --ground_model qwen2.5-vl-72b-instruct \
+  --ground_url "https://..." --ground_api_key "xxx" \
+  --grounding_width 1000 --grounding_height 1000 \
+  --tg-bot-token "123456789:ABCdef..." \
+  --tg-chat-id "987654321"
+```
+
+### 3. What you will receive
+
+| Event | Message type |
+|---|---|
+| Task started | Text with the task instruction |
+| Each step | Photo (screenshot) with caption "Step N/15" |
+| Action executed | Text with the pyautogui/code snippet |
+| Task done / fail | Text with the final status |
+| Worker step logs | Text forwarded from the `desktopenv.agent` logger (INFO level) |
+| Token usage | Text: `[USAGE] model=... in=X out=Y` after each LLM call |
+
+If `TG_BOT_TOKEN` / `TG_CHAT_ID` are not set, the feature is silently disabled — no changes to terminal output.
+
+---
+
 ## Acknowledgements
 
 HIPPO Agent was developed on top of the Agent-S3 codebase. We sincerely thank the Agent-S3 authors and maintainers for open-sourcing their work.

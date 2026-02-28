@@ -153,10 +153,14 @@ def scale_screen_dimensions(width: int, height: int, max_dim_size: int):
 
 
 def run_agent(agent, instruction: str, scaled_width: int, scaled_height: int):
+    from muscle_mem.utils.telegram_notifier import get_notifier
     global paused
     obs = {}
     traj = "Task:\n" + instruction
     subtask_traj = ""
+    _tg = get_notifier()
+    if _tg:
+        _tg.send_text(f"[TASK STARTED]\n{instruction}")
     for step in range(15):
         # Check if we're in paused state and wait
         while paused:
@@ -173,6 +177,8 @@ def run_agent(agent, instruction: str, scaled_width: int, scaled_height: int):
         screenshot_bytes = buffered.getvalue()
         # Convert to base64 string.
         obs["screenshot"] = screenshot_bytes
+        if _tg:
+            _tg.send_photo(screenshot_bytes, caption=f"Step {step + 1}/15")
 
         # Check again for pause state before prediction
         while paused:
@@ -182,8 +188,12 @@ def run_agent(agent, instruction: str, scaled_width: int, scaled_height: int):
 
         # Get next action code from the agent
         info, code = agent.predict(instruction=instruction, observation=obs)
+        if _tg:
+            _tg.send_text(f"Step {step + 1} action:\n{code[0][:800]}")
 
         if "done" in code[0].lower() or "fail" in code[0].lower():
+            if _tg:
+                _tg.send_text(f"Task finished: {code[0][:800]}")
             if platform.system() == "Darwin":
                 os.system(
                     f'osascript -e \'display dialog "Task Completed" with title "OpenACI Agent" buttons "OK" default button "OK"\''
@@ -339,8 +349,35 @@ def main():
         default=False,
         help="Enable local coding environment for code execution (WARNING: Executes arbitrary code locally)",
     )
+    parser.add_argument(
+        "--tg-bot-token",
+        "--tg_bot_token",
+        dest="tg_bot_token",
+        type=str,
+        default=os.getenv("TG_BOT_TOKEN"),
+        help="Telegram bot token for monitoring (or set TG_BOT_TOKEN env var)",
+    )
+    parser.add_argument(
+        "--tg-chat-id",
+        "--tg_chat_id",
+        dest="tg_chat_id",
+        type=str,
+        default=os.getenv("TG_CHAT_ID"),
+        help="Telegram chat ID for monitoring (or set TG_CHAT_ID env var)",
+    )
 
     args = parser.parse_args()
+
+    # Initialize Telegram monitoring (no-op if credentials are not provided)
+    if args.tg_bot_token and args.tg_chat_id:
+        from muscle_mem.utils.telegram_notifier import init_notifier, TelegramLogHandler
+        from muscle_mem.core.engine import register_usage_hook
+        _tg_notifier = init_notifier(args.tg_bot_token, args.tg_chat_id)
+        register_usage_hook(_tg_notifier.on_usage)
+        _tg_log_handler = TelegramLogHandler()
+        _tg_log_handler.setLevel(logging.INFO)
+        _tg_log_handler.addFilter(logging.Filter("desktopenv"))
+        logger.addHandler(_tg_log_handler)
 
     # Re-scales screenshot size to ensure it fits in UI-TARS context limit
     screen_width, screen_height = pyautogui.size()
@@ -421,6 +458,7 @@ def main():
 
         # Run the agent on your own device
         run_agent(agent, query, scaled_width, scaled_height)
+
 
         response = input("Would you like to provide another query? (y/n): ")
         if response.lower() != "y":
