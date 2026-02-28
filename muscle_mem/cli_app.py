@@ -11,9 +11,12 @@ import time
 
 from PIL import Image
 
+from dotenv import load_dotenv
 from muscle_mem.agents.grounding import OSWorldACI
 from muscle_mem.agents.agent import AgentMm
 from muscle_mem.utils.local_env import LocalEnv
+
+load_dotenv()
 
 current_platform = platform.system().lower()
 
