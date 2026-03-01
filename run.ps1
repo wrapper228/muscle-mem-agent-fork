@@ -31,9 +31,11 @@ foreach ($var in @("ANTHROPIC_API_KEY", "GROUND_URL", "GROUND_API_KEY", "IMAGE_G
 
 # --- Run agent ---
 & "$PSScriptRoot\mem_venv\Scripts\muscle-mem-agent.exe" `
+    --enable_local_env `
     --provider anthropic `
-    --model claude-opus-4-5 `
+    --model claude-sonnet-4-5 `
     --model_url https://api.anthropic.com `
+    --model_temperature 0.0 `
     --ground_provider openai `
     --ground_model qwen3-vl-plus `
     --ground_url $env:GROUND_URL `
