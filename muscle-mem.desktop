@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=HIPPO Agent
+Comment=Memory-augmented computer-use agent for GUI tasks
+Exec=x-terminal-emulator -e "bash -c 'cd REPO_PATH && ./run.sh; exec bash'"
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;Utility;
