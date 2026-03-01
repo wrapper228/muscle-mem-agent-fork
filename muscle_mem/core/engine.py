@@ -215,7 +215,7 @@ class LMMEngineAnthropic(LMMEngine):
 
         print(f"Using Anthropic base_url: {self.base_url}, model: {self.model}")
         self.llm_client = Anthropic(
-            base_url=self.base_url, api_key="", auth_token=api_key
+            base_url=self.base_url or None, api_key=api_key
         )
         # Use the instance temperature if not specified in the call
         temp = self.temperature if temperature is None else temperature
